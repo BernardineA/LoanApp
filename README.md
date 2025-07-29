@@ -1,2 +1,2 @@
 # LoanApp
-Loan default prediction 
+Loan default prediction App 
