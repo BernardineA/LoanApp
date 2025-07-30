@@ -170,6 +170,10 @@ def main():
         return  # Exit if no data is loaded
     df = st.session_state['data']
 
+    # Target Feature Selection
+    st.sidebar.markdown("### 🎯 Target Feature Selection")
+    target_column = st.sidebar.selectbox("Select the target feature:", options=df.columns)
+
     with st.expander("📊 Quick Summary Panel", expanded=True):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -234,8 +238,8 @@ def main():
         st.subheader("📊 Data Visualization")
         numeric_df = df.select_dtypes(include=[np.number])
         if not numeric_df.empty:
-            subtab1, subtab2, subtab3, subtab4 = st.tabs([
-                "Distribution", "Correlation", "Scatter", "Boxplot"
+            subtab1, subtab2, subtab3, subtab4, subtab5 = st.tabs([
+                "Distribution", "Correlation", "Scatter", "Boxplot", "Target"
             ])
             with subtab1:
                 # Improved default for distribution plot
@@ -269,6 +273,17 @@ def main():
                 fig = px.box(df, y=selected_col, title=f"Boxplot of {selected_col}")
                 st.plotly_chart(fig, use_container_width=True)
                 st.markdown(f"Box plot of the '{selected_col}' column, highlighting potential outliers.")
+
+            with subtab5:
+                # Pie chart for target variable
+                if target_column in df.columns:
+                    target_counts = df[target_column].value_counts()
+                    fig = px.pie(target_counts, values=target_counts.values, names=target_counts.index, title=f"Distribution of {target_column}")
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown(f"Pie chart showing the distribution of the target variable '{target_column}'.")
+                else:
+                    st.warning(f"Target column '{target_column}' not found in the dataset.")
+
         else:
             st.warning("No numeric data available for visualizations.")
 
@@ -299,34 +314,20 @@ def main():
                     st.markdown("DataFrame containing the detected outliers.")
 
     st.markdown("---")
-    st.markdown("## 📀 Export Options")
-    col1, col2, col3, col4 = st.columns(4)  # Added a fourth column
-
-    with col1:
-        if st.button("📊 Download EDA Report"):
-            # Placeholder for EDA report generation
-            st.info("Feature coming soon: Automated EDA report generation")
-
-    with col2:
-        if st.button("📈 Download Visualizations"):
-            # Placeholder for downloading visualizations
-            st.info("Feature coming soon: Export all charts as PDF/Images")
-
-    with col3:
-        csv = df.to_csv(index=False)
-        st.download_button("📁 Download Processed Data", data=csv, file_name="explored_data.csv", mime="text/csv", help="Download the processed data as a CSV file.")
-
-    with col4:
-        # Button to save data for preprocessing
-        if st.button("💾 Save Data for Preprocessing"):
-            st.session_state['preprocessing_data'] = df  # Save to a different key
-            st.success("✅ Data saved for preprocessing!")
-            st.info("You can now navigate to the preprocessing page to use this data.")
+    st.markdown("## 💾 Save Data for Preprocessing")
+    st.markdown("Ready to preprocess your data now? Click here and save your data for preprocessing.")
+    if st.button("💾 Save Data for Preprocessing"):
+        st.session_state['preprocessing_data'] = df  # Save to a different key
+        st.session_state['target_column'] = target_column  # Save the target column
+        st.success("✅ Data saved for preprocessing!")
+        st.info("You can now navigate to the preprocessing page to use this data.")
 
     # Example of how to access the data on the preprocessing page (This would be in your preprocessing page code)
     # if 'preprocessing_data' in st.session_state:
     #     preprocessing_df = st.session_state['preprocessing_data']
+    #     target_column = st.session_state['target_column']
     #     st.write("Data loaded for preprocessing:")
+    #     st.write(f"Target column: {target_column}")
     #     st.dataframe(preprocessing_df.head())
     # else:
     #     st.info("No data saved for preprocessing yet.")
