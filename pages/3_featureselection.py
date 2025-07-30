@@ -11,6 +11,13 @@ import statsmodels.api as sm
 from itertools import combinations
 import time
 import warnings
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from io import BytesIO
+import hashlib  # Import the hashlib library
 
 warnings.filterwarnings('ignore')
 
@@ -20,6 +27,7 @@ st.title("🎯 Feature Selection")
 st.markdown("---")
 
 
+@st.cache_data
 def calculate_feature_importance_stats(X, y):
     """Calculate various feature importance statistics"""
     results = {}
@@ -45,7 +53,8 @@ def calculate_feature_importance_stats(X, y):
     return results
 
 
-def calculate_model_metrics(X, y, model):
+@st.cache_data
+def calculate_model_metrics(X, y, _model):  # Changed 'model' to '_model'
     """Calculate R2, Adjusted R2, RMSE, AIC, and BIC for a given model."""
     X_sm = sm.add_constant(X)  # Add constant for statsmodels
     model_sm = sm.OLS(y, X_sm).fit()
@@ -58,13 +67,13 @@ def calculate_model_metrics(X, y, model):
     return r2, adjusted_r2, rmse, aic, bic
 
 
+@st.cache_data
 def best_subset_selection(X, y, max_features=10):
     """
     Implements Best Subset Selection to identify the most predictive subset of features.
     """
     best_score = -np.inf
     best_features = None
-    best_model = None
     results = []
 
     for k in range(1, min(max_features + 1, X.shape[1] + 1)):
@@ -86,12 +95,12 @@ def best_subset_selection(X, y, max_features=10):
             if score > best_score:
                 best_score = score
                 best_features = subset
-                best_model = model
 
     results_df = pd.DataFrame(results)
-    return best_features, best_model, results_df
+    return best_features, None, results_df
 
 
+@st.cache_data
 def forward_stepwise_selection(X, y, max_features=10):
     """
     Implements Forward Stepwise Selection to identify the most predictive subset of features.
@@ -99,13 +108,11 @@ def forward_stepwise_selection(X, y, max_features=10):
     selected_features = []
     available_features = list(X.columns)
     best_score = -np.inf
-    best_model = None
     results = []
 
     while available_features and len(selected_features) < max_features:
         current_best_feature = None
         current_best_score = -np.inf
-        current_best_model = None
         current_r2 = None
         current_adjusted_r2 = None
         current_rmse = None
@@ -129,7 +136,6 @@ def forward_stepwise_selection(X, y, max_features=10):
             if score > current_best_score:
                 current_best_score = score
                 current_best_feature = feature
-                current_best_model = model
                 current_r2 = r2
                 current_adjusted_r2 = adjusted_r2
                 current_rmse = rmse
@@ -140,14 +146,82 @@ def forward_stepwise_selection(X, y, max_features=10):
         if current_best_feature is not None:
             selected_features.append(current_best_feature)
             available_features.remove(current_best_feature)
-            results.append({'features': selected_features, 'r2': current_r2, 'adjusted_r2': current_adjusted_r2, 'rmse': current_rmse, 'aic': current_aic, 'bic': current_bic, 'num_features': len(selected_features)})
+            results.append({'features': selected_features, 'r2': current_r2, 'adjusted_r2': current_adjusted_r2, 'rmse': current_rmse, 'aic': current_aic, 'bic': bic, 'num_features': len(selected_features)})
             best_score = current_best_score
-            best_model = current_best_model
         else:
             break  # No improvement, stop adding features
 
     results_df = pd.DataFrame(results)
-    return selected_features, best_model, results_df
+    return selected_features, None, results_df
+
+
+def generate_report(comparison_df, best_method, X, y, final_features):
+    """Generates a report explaining feature selection methods and results."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    story.append(Paragraph("Feature Selection Report", styles['h1']))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Introduction
+    story.append(Paragraph("This report summarizes the feature selection process, comparing different methods and highlighting the best choice.", styles['Normal']))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Method Comparison
+    story.append(Paragraph("<b>Method Comparison:</b>", styles['h2']))
+    story.append(Paragraph("The following table compares the performance of different feature selection methods:", styles['Normal']))
+
+    # Convert DataFrame to string for report
+    table_data = comparison_df.to_string()
+    story.append(Paragraph(table_data, styles['Code']))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Best Method Explanation
+    story.append(Paragraph("<b>Best Method:</b>", styles['h2']))
+    story.append(Paragraph(f"The best feature selection method was <b>{best_method}</b>.", styles['Normal']))
+
+    # Add explanation based on the best method
+    if best_method == 'Best Subset':
+        story.append(Paragraph("Best Subset Selection was chosen for its ability to evaluate all possible feature combinations, optimizing for Adjusted R-squared and AIC.", styles['Normal']))
+    elif best_method == 'Forward Stepwise':
+        story.append(Paragraph("Forward Stepwise Selection was selected for its efficiency in adding features incrementally, providing a balance between performance and computational cost.", styles['Normal']))
+    elif best_method == 'Lasso':
+        story.append(Paragraph("Lasso Regression was chosen for its ability to perform feature selection by shrinking the coefficients of less important features to zero, resulting in a sparse and robust model.", styles['Normal']))
+    elif best_method == 'Random Forest':
+        story.append(Paragraph("Random Forest was selected for its ability to capture non-linear relationships and provide robust feature importance scores, optimizing for RMSE.", styles['Normal']))
+
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Final Features
+    story.append(Paragraph("<b>Final Features:</b>", styles['h2']))
+    story.append(Paragraph(f"The final selected features are: {', '.join(final_features)}.", styles['Normal']))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Model Performance with Final Features
+    story.append(Paragraph("<b>Model Performance with Final Features:</b>", styles['h2']))
+    model = LinearRegression()
+    model.fit(X[final_features], y)
+    r2, adjusted_r2, rmse, aic, bic = calculate_model_metrics(X[final_features], y, model)
+    story.append(Paragraph(f"R-squared: {r2:.4f}", styles['Normal']))
+    story.append(Paragraph(f"Adjusted R-squared: {adjusted_r2:.4f}", styles['Normal']))
+    story.append(Paragraph(f"RMSE: {rmse:.4f}", styles['Normal']))
+    story.append(Paragraph(f"AIC: {aic:.4f}", styles['Normal']))
+    story.append(Paragraph(f"BIC: {bic:.4f}", styles['Normal']))
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Conclusion
+    story.append(Paragraph("In conclusion, the selected features provide a strong foundation for building a predictive model. The chosen feature selection method balances performance, interpretability, and computational efficiency.", styles['Normal']))
+
+    # Monkey-patch reportlab to use hashlib
+    import reportlab.pdfbase.pdfdoc as pdfdoc
+    pdfdoc.md5 = hashlib.md5
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 
 def main():
@@ -162,6 +236,10 @@ def main():
         st.session_state.selected_features = None
     if 'preprocessed_data' not in st.session_state:
         st.session_state.preprocessed_data = None
+    if 'final_dataset' not in st.session_state:
+        st.session_state.final_dataset = None
+    if 'feature_selection_results' not in st.session_state:
+        st.session_state.feature_selection_results = {}
 
     # Data Loading Section
     st.markdown("## 📁 Data Loading")
@@ -169,27 +247,32 @@ def main():
     col1, col2 = st.columns([2, 1])
 
     with col1:
+        # Load data from session state if available
+        if 'processed_data' in st.session_state and st.session_state.processed_data is not None:
+            df = st.session_state.processed_data
+            st.success("✅ Loaded preprocessed data from previous step.")
+        else:
+            df = None  # Initialize df to None
+
         uploaded_file = st.file_uploader(
             "Upload preprocessed dataset (CSV format)",
             type=['csv'],
             help="Upload a preprocessed CSV file for feature selection"
         )
 
-    # Load data
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.success(f"✅ Dataset loaded successfully! Shape: {df.shape}")
-            st.session_state.preprocessed_data = df  # Save to session state
-        except Exception as e:
-            st.error(f"Error loading file: {str(e)}")
+        # Load data from uploaded file if available
+        if uploaded_file is not None:
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.success(f"✅ Dataset loaded successfully! Shape: {df.shape}")
+                st.session_state.preprocessed_data = df  # Save to session state
+            except Exception as e:
+                st.error(f"Error loading file: {str(e)}")
+                return
+
+        if df is None:
+            st.info("👆 Please upload a preprocessed dataset or load from the previous step to begin feature selection.")
             return
-    elif st.session_state.preprocessed_data is not None:
-        df = st.session_state.preprocessed_data
-        st.success("✅ Loaded preprocessed data from previous step.")
-    else:
-        st.info("👆 Please upload a preprocessed dataset to begin feature selection.")
-        return
 
     # Target Variable Selection
     st.markdown("## 🎯 Target Variable Selection")
@@ -222,6 +305,7 @@ def main():
 
         with tab1:
             st.markdown("### 📊 Statistical Feature Analysis")
+            st.markdown("Use statistical measures to assess the relationship between each feature and the target variable.")
 
             # Calculate feature importance statistics
             with st.spinner("Calculating feature importance statistics..."):
@@ -231,6 +315,7 @@ def main():
 
             with col1:
                 st.markdown("#### Feature Importance Comparison")
+                st.markdown("Compare feature importance scores from different statistical methods.")
 
                 # Create comparison dataframe
                 comparison_df = pd.DataFrame({
@@ -239,15 +324,11 @@ def main():
                     'Mutual Info': importance_stats['mutual_info'][X.columns],
                 })
 
-                # Normalize scores for comparison
-                for col in ['Correlation', 'Mutual Info']:
-                    comparison_df[f'{col}_norm'] = (comparison_df[col] - comparison_df[col].min()) / (
-                                comparison_df[col].max() - comparison_df[col].min())
-
                 st.dataframe(comparison_df.round(4))
 
             with col2:
                 st.markdown("#### Feature Importance Visualization")
+                st.markdown("Visualize the top features based on selected statistical method.")
 
                 method = st.selectbox(
                     "Select method to visualize:",
@@ -269,6 +350,7 @@ def main():
 
             # Heatmap of all importance methods
             st.markdown("#### Feature Importance Heatmap")
+            st.markdown("Visualize the normalized feature importance across different methods using a heatmap.")
 
             heatmap_data = comparison_df[
                 ['Feature', 'Correlation', 'Mutual Info']].set_index(
@@ -287,6 +369,7 @@ def main():
 
         with tab2:
             st.markdown("### 💡 Subset Selection Methods")
+            st.markdown("Evaluate all possible subsets of features to find the best performing combination.")
 
             max_features_bss = st.slider(
                 "Maximum number of features to consider (Subset Selection):",
@@ -315,6 +398,7 @@ def main():
                     # Best Subset Selection
                     if 'Best Subset Selection' in subset_methods:
                         best_features, best_model, results_df_bss = best_subset_selection(X, y, max_features_bss)
+                        st.session_state.feature_selection_results['Best Subset'] = {'features': best_features}  # Store in session state
                         st.session_state.best_features = best_features
                         st.session_state.results_df_bss = results_df_bss
                     else:
@@ -324,6 +408,7 @@ def main():
                     # Forward Stepwise Selection
                     if 'Forward Stepwise Selection' in subset_methods:
                         selected_features, best_model, results_df_fss = forward_stepwise_selection(X, y, max_features_fss)
+                        st.session_state.feature_selection_results['Forward Stepwise'] = {'features': selected_features}  # Store in session state
                         st.session_state.selected_features = selected_features
                         st.session_state.results_df_fss = results_df_fss
                     else:
@@ -360,6 +445,7 @@ def main():
                         lasso_cv.fit(X_scaled, y)
                         selected_mask = np.abs(lasso_cv.coef_) > 1e-6
                         selected_features_lasso = X.columns[selected_mask].tolist()
+                        st.session_state.feature_selection_results['Lasso'] = {'features': selected_features_lasso}  # Store in session state
                         st.session_state.selected_features_lasso = selected_features_lasso
                     else:
                         st.session_state.selected_features_lasso = None
@@ -371,6 +457,7 @@ def main():
                         importance_threshold = 0.01  # Fixed threshold for simplicity
                         selected_mask = rf.feature_importances_ > importance_threshold
                         selected_features_rf = X.columns[selected_mask].tolist()
+                        st.session_state.feature_selection_results['Random Forest'] = {'features': selected_features_rf}  # Store in session state
                         st.session_state.selected_features_rf = selected_features_rf
                     else:
                         st.session_state.selected_features_rf = None
@@ -402,7 +489,8 @@ def main():
                     'AIC': aic,
                     'BIC': bic,
                     '#Features': len(best_features),
-                    'Notes': 'Best on adj R² & AIC'
+                    'Notes': 'Best on adj R² & AIC',
+                    'Algorithm': 'Subset Selection'
                 })
 
             # Forward Stepwise Selection
@@ -420,7 +508,8 @@ def main():
                     'AIC': aic,
                     'BIC': bic,
                     '#Features': len(selected_features),
-                    'Notes': ''
+                    'Notes': '',
+                    'Algorithm': 'Stepwise Selection'
                 })
 
             # Lasso
@@ -438,27 +527,27 @@ def main():
                     'AIC': aic,
                     'BIC': bic,
                     '#Features': len(selected_features_lasso),
-                    'Notes': 'Sparse, robust'
+                    'Notes': 'Sparse, robust',
+                    'Algorithm': 'Embedded'
                 })
 
             # Random Forest
             if 'selected_features_rf' in st.session_state and st.session_state.selected_features_rf:
                 selected_features_rf = st.session_state.selected_features_rf
-                model = RandomForestRegressor()
+                model = LinearRegression()
                 model.fit(X[selected_features_rf], y)
-                y_pred = model.predict(X[selected_features_rf])
-                r2 = r2_score(y, y_pred)
-                rmse = np.sqrt(np.mean((y - y_pred)**2))
+                r2, adjusted_r2, rmse, aic, bic = calculate_model_metrics(X[selected_features_rf], y, model)
                 comparison_data.append({
                     'Method': 'Random Forest',
                     'Features Selected': selected_features_rf,
                     'R²': r2,
-                    'Adj R²': '—',
+                    'Adj R²': adjusted_r2,
                     'RMSE': rmse,
-                    'AIC': '—',
-                    'BIC': '—',
+                    'AIC': aic,
+                    'BIC': bic,
                     '#Features': len(selected_features_rf),
-                    'Notes': 'Best RMSE, nonlinear'
+                    'Notes': 'Best RMSE, nonlinear',
+                    'Algorithm': 'Embedded'
                 })
 
             # Determine best method
@@ -517,52 +606,55 @@ def main():
             col1, col2 = st.columns(2)
 
             with col1:
-                selection_method = st.selectbox(
-                    "Selection strategy:",
+                selection_methods = st.multiselect(
+                    "Select feature selection algorithms:",
                     [
-                        'Best Subset Selection',
-                        'Forward Stepwise Selection',
+                        'Best Subset',
+                        'Forward Stepwise',
                         'Lasso',
                         'Random Forest',
                         'Custom Selection'
-                    ]
+                    ],
+                    default=['Best Subset']
                 )
 
-                if selection_method == 'Best Subset Selection':
-                    if 'best_features' in st.session_state and st.session_state.best_features:
-                        final_features = st.session_state.best_features
-                    else:
-                        st.warning("Run Best Subset Selection first.")
-                        final_features = []
+                final_features = []
+                for method in selection_methods:
+                    if method == 'Best Subset':
+                        if 'best_features' in st.session_state and st.session_state.best_features:
+                            final_features.extend(st.session_state.best_features)
+                        else:
+                            st.warning("Run Best Subset Selection first.")
 
-                elif selection_method == 'Forward Stepwise Selection':
-                    if 'selected_features' in st.session_state and st.session_state.selected_features:
-                        final_features = st.session_state.selected_features
-                    else:
-                        st.warning("Run Forward Stepwise Selection first.")
-                        final_features = []
+                    elif method == 'Forward Stepwise':
+                        if 'selected_features' in st.session_state and st.session_state.selected_features:
+                            final_features.extend(st.session_state.selected_features)
+                        else:
+                            st.warning("Run Forward Stepwise Selection first.")
 
-                elif selection_method == 'Lasso':
-                    if 'selected_features_lasso' in st.session_state and st.session_state.selected_features_lasso:
-                        final_features = st.session_state.selected_features_lasso
-                    else:
-                        st.warning("Run Lasso Feature Selection first.")
-                        final_features = []
+                    elif method == 'Lasso':
+                        if 'selected_features_lasso' in st.session_state and st.session_state.selected_features_lasso:
+                            final_features.extend(st.session_state.selected_features_lasso)
+                        else:
+                            st.warning("Run Lasso Feature Selection first.")
 
-                elif selection_method == 'Random Forest':
-                    if 'selected_features_rf' in st.session_state and st.session_state.selected_features_rf:
-                        final_features = st.session_state.selected_features_rf
-                    else:
-                        st.warning("Run Random Forest Feature Selection first.")
-                        final_features = []
+                    elif method == 'Random Forest':
+                        if 'selected_features_rf' in st.session_state and st.session_state.selected_features_rf:
+                            final_features.extend(st.session_state.selected_features_rf)
+                        else:
+                            st.warning("Run Random Forest Feature Selection first.")
 
-                else:  # Custom Selection
-                    all_features = list(X.columns)
-                    final_features = st.multiselect(
-                        "Select features manually:",
-                        all_features,
-                        default=all_features[:min(5, len(all_features))]
-                    )
+                    elif method == 'Custom Selection':
+                        all_features = list(X.columns)
+                        custom_features = st.multiselect(
+                            "Select features manually:",
+                            all_features,
+                            default=all_features[:min(5, len(all_features))]
+                        )
+                        final_features.extend(custom_features)
+
+                # Remove duplicates
+                final_features = list(set(final_features))
 
             with col2:
                 st.markdown("#### Selected Features Summary")
@@ -594,6 +686,8 @@ def main():
                 st.markdown("#### Final Features Visualization")
 
                 # Correlation matrix of selected features
+                st.markdown("##### Correlation Matrix")
+                st.markdown("This heatmap shows the correlation between the selected features.  Strong positive correlations are shown in blue, strong negative correlations in red, and weak correlations are closer to white.")
                 selected_data = X[final_features]
                 corr_matrix = selected_data.corr()
 
@@ -606,6 +700,8 @@ def main():
                 st.plotly_chart(fig, use_container_width=True)
 
                 # Feature importance comparison for selected features
+                st.markdown("##### Feature Importance Comparison")
+                st.markdown("This chart compares the feature importance scores (Correlation and Mutual Information) for the selected features.")
                 selected_importance = pd.DataFrame({
                     'Feature': final_features,
                     'Correlation': [importance_stats['correlation'][f] for f in final_features],
@@ -626,6 +722,43 @@ def main():
                     height=500
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+            # Report Generation
+            if comparison_data and final_features:
+                st.markdown("#### Generate Report")
+                read_report = st.checkbox("Display Report", value=False)
+                report_content = ""  # Initialize report_content
+                if st.button("Generate and Download Report"):
+                    report_buffer = generate_report(comparison_df, best_method, X, y, final_features)
+                    st.download_button(
+                        label="Download Feature Selection Report",
+                        data=report_buffer,
+                        file_name="feature_selection_report.pdf",
+                        mime="application/pdf"
+                    )
+                    # Generate report content immediately after generating the report
+                    report_buffer = generate_report(comparison_df, best_method, X, y, final_features)
+                    try:
+                        report_content = report_buffer.read().decode('utf-8')
+                    except UnicodeDecodeError:
+                        report_content = report_buffer.read().decode('latin-1')  # Try latin-1 encoding
+
+                if read_report:
+                    st.markdown(report_content, unsafe_allow_html=True)
+
+            # Save for Model Training
+            if 'final_dataset' in st.session_state and st.session_state.final_dataset is not None:
+                st.markdown("#### Save for Model Training")
+                if st.button("💾 Save for Model Training"):
+                    st.session_state.modeling_data = st.session_state.final_dataset.copy()
+                    st.success("Data saved for Model Training!")
+
+    st.markdown("---")
+    st.markdown("Are you ready to train your data?")
+    if st.button("Click here and load the data to Model Training"):
+        st.session_state['model_training_data'] = df.copy()
+        st.success("Data saved for Model Training!")
+        st.info("You can now navigate to the Model Training page to use this data.")
 
 
 def r2_score(y_true, y_pred):
