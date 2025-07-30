@@ -18,7 +18,7 @@ import os  # For file path management
 
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="Loan Default Risk Prediction", page_icon="💰", layout="wide")
+st.set_page_config(page_title="Loan Default Amount Prediction", page_icon="💰", layout="wide")
 
 # Custom CSS for a more visually appealing layout
 st.markdown(
@@ -81,9 +81,12 @@ st.markdown(
 )
 
 # --- Branding ---
-st.image("https://via.placeholder.com/150", width=100)  # Replace with your logo
-st.title("💰 Loan Default Risk Prediction")
-st.markdown("Enter customer data to predict loan default risk.")
+try:
+    st.image("images/logo.jpg", width=100)  # Replace with your logo
+except FileNotFoundError:
+    st.warning("Logo image 'images/logo.jpg' not found.  Please place the logo in the 'images' folder.")
+st.title("💰 Loan Default Amount Prediction")
+st.markdown("Enter customer data to predict loan default amount.")
 st.markdown("---")
 
 # --- Load Model and Data ---
@@ -153,6 +156,13 @@ if models[selected_model_name] is None:
 # --- Default Input Fields ---
 default_fields = {}  # Store default field values
 
+# Define options for selectbox fields
+gender_options = ["Male", "Female", "Other"]
+marital_status_options = ["Single", "Married", "Divorced", "Widowed"]
+employment_status_options = ["Employed", "Self-employed", "Unemployed"]
+loan_purpose_options = ["Debt Consolidation", "Home Improvement", "Car Purchase", "Education", "Other"]
+loan_term_options = [6, 12, 24, 36]
+
 with st.form("loan_application_form"):
     st.header("Customer Information")
 
@@ -160,16 +170,16 @@ with st.form("loan_application_form"):
         col1, col2 = st.columns(2)
         with col1:
             default_fields['Customer Full Name'] = st.text_input("Customer Full Name", help="Enter the customer's full name.")
-            default_fields['Gender'] = st.selectbox("Gender", options=["Male", "Female", "Other"], help="Select the customer's gender.")
+            default_fields['Gender'] = st.selectbox("Gender", options=gender_options, help="Select the customer's gender.")
             default_fields['Age'] = st.number_input("Age", min_value=18, max_value=100, value=30, help="Enter the customer's age.")
         with col2:
             default_fields['Location / Region'] = st.text_input("Location / Region", help="Enter the customer's location or region.")
-            default_fields['Marital Status'] = st.selectbox("Marital Status", options=["Single", "Married", "Divorced", "Widowed"], help="Select the customer's marital status.")
+            default_fields['Marital Status'] = st.selectbox("Marital Status", options=marital_status_options, help="Select the customer's marital status.")
 
     with st.expander("Employment Details"):
         col1, col2 = st.columns(2)
         with col1:
-            default_fields['Employment Status'] = st.selectbox("Employment Status", options=["Employed", "Self-employed", "Unemployed"], help="Select the customer's employment status.")
+            default_fields['Employment Status'] = st.selectbox("Employment Status", options=employment_status_options, help="Select the customer's employment status.")
             default_fields['Occupation'] = st.text_input("Occupation", help="Enter the customer's occupation.")
         with col2:
             default_fields['Monthly Income'] = st.number_input("Monthly Income", min_value=0, value=3000, help="Enter the customer's monthly income.")
@@ -182,8 +192,8 @@ with st.form("loan_application_form"):
             default_fields['Number of Existing Loans'] = st.number_input("Number of Existing Loans", min_value=0, value=1, help="Enter the number of existing loans the customer has.")
             default_fields['Loan Amount Requested'] = st.number_input("Loan Amount Requested", min_value=1000, value=10000, help="Enter the amount of loan the customer is requesting.")
         with col2:
-            default_fields['Loan Purpose'] = st.selectbox("Loan Purpose", options=["Debt Consolidation", "Home Improvement", "Car Purchase", "Education", "Other"], help="Select the purpose of the loan.")
-            default_fields['Loan Term (months)'] = st.selectbox("Loan Term (months)", options=[6, 12, 24, 36], help="Select the desired loan term in months.")
+            default_fields['Loan Purpose'] = st.selectbox("Loan Purpose", options=loan_purpose_options, help="Select the purpose of the loan.")
+            default_fields['Loan Term (months)'] = st.selectbox("Loan Term (months)", options=loan_term_options, help="Select the desired loan term in months.")
 
     # --- Load Model and Feature Names ---
 
@@ -218,13 +228,28 @@ with st.form("loan_application_form"):
         # Determine the input type based on the feature name (you might need a better mapping)
         if 'income' in feature.lower() or 'amount' in feature.lower() or 'credit' in feature.lower() or 'age' in feature.lower() or 'experience' in feature.lower():
             dynamic_fields[feature] = st.number_input(f"❌ Please enter: {feature}", help=f"This field is required for the model.", key=f"dynamic_{feature}")
-        elif 'status' in feature.lower() or 'purpose' in feature.lower() or 'gender' in feature.lower() or 'marital' in feature.lower():
-            dynamic_fields[feature] = st.selectbox(f"❌ Please enter: {feature}", options=['Option 1', 'Option 2', 'Option 3'], help=f"This field is required for the model.", key=f"dynamic_{feature}")  # Replace options
+        elif 'status' in feature.lower():
+            # Status should be 0 or 1
+            dynamic_fields[feature] = st.selectbox(f"❌ Please enter: {feature}", options=[0, 1], help=f"This field is required for the model. (0 or 1)", key=f"dynamic_{feature}")
+        elif 'purpose' in feature.lower() or 'gender' in feature.lower() or 'marital' in feature.lower():
+            # Use the correct options for each selectbox
+            if 'gender' in feature.lower():
+                options = gender_options
+            elif 'marital' in feature.lower():
+                options = marital_status_options
+            elif 'employment' in feature.lower():
+                options = employment_status_options
+            elif 'purpose' in feature.lower():
+                options = loan_purpose_options
+            else:
+                options = ['Option 1', 'Option 2', 'Option 3']  # Default options
+
+            dynamic_fields[feature] = st.selectbox(f"❌ Please enter: {feature}", options=options, help=f"This field is required for the model.", key=f"dynamic_{feature}")
         else:
             dynamic_fields[feature] = st.text_input(f"❌ Please enter: {feature}", help=f"This field is required for the model.", key=f"dynamic_{feature}")  # Unique key
 
     reset_form = st.form_submit_button("Reset Form")
-    submit_button = st.form_submit_button("Predict Loan Default Risk")
+    submit_button = st.form_submit_button("Predict Loan Default Amount")
 
     # --- Validation and Prediction Logic ---
     if submit_button:
@@ -268,6 +293,12 @@ with st.form("loan_application_form"):
                 for col in input_df.columns:
                     if col in ['Gender', 'Employment Status', 'Loan Purpose', 'Marital Status']:
                         input_df[col] = input_df[col].astype('category')
+                    else:
+                        try:
+                            input_df[col] = pd.to_numeric(input_df[col])  # Convert to numeric if possible
+                        except ValueError:
+                            st.error(f"Could not convert column '{col}' to numeric.  Please check the input data.")
+                            st.stop()
 
         except KeyError as e:
             st.error(f"Error: Missing required feature(s) in input data: {e}. Please check the training page and ensure all required features are provided.")
