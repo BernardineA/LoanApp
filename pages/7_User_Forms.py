@@ -82,9 +82,9 @@ st.markdown(
 
 # --- Branding ---
 try:
-    st.image("images/logo.jpg", width=100)  # Replace with your logo
+    st.image("images/Logo.jpg", width=100)  # Replace with your logo
 except FileNotFoundError:
-    st.warning("Logo image 'images/logo.jpg' not found.  Please place the logo in the 'images' folder.")
+    st.warning("Logo image 'images/Logo.jpg' not found.  Please place the logo in the 'images' folder.")
 st.title("💰 Loan Default Amount Prediction")
 st.markdown("Enter customer data to predict loan default amount.")
 st.markdown("---")
