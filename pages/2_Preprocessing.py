@@ -113,7 +113,12 @@ def main():
         else:
             return
     else:
-        if st.session_state.data_source is None:
+        # Check if data is available from the previous page
+        if 'preprocessing_data' in st.session_state:
+            df = st.session_state['preprocessing_data']
+            st.success("✅ Data loaded from Data Exploration page!")
+            st.session_state.data_source = 'exploration'
+        elif st.session_state.data_source is None:
             st.info("👆 Please upload a dataset or use the default data to begin preprocessing.")
             return
 
@@ -288,7 +293,7 @@ def main():
 
                     treatment = st.selectbox(
                         "Select treatment method:",
-                        ['None', 'Remove Outliers', 'Cap at Percentiles', 'Transform (Log)', 'Winsorize'],
+                        ['None', 'Remove Outliers', 'Cap at Percentiles', 'Transform (Log)'],
                         key="outlier_treatment"
                     )
 
@@ -306,13 +311,16 @@ def main():
                             upper_pct = st.slider("Upper percentile:", 90.0, 100.0, 95.0)
 
                             if st.button("Apply Capping"):
-                                lower_cap = df[selected_cols].quantile(lower_pct / 100)
-                                upper_cap = df[selected_cols].quantile(upper_pct / 100)
-                                df[selected_cols] = np.clip(df[selected_cols], lower_cap, upper_cap)
-                                st.success("Outliers capped successfully")
-                                st.session_state.processed_data = df.copy()
-                                st.dataframe(df.head())
-                                st.rerun()
+                                try:
+                                    lower_cap = df[selected_cols].quantile(lower_pct / 100)
+                                    upper_cap = df[selected_cols].quantile(upper_pct / 100)
+                                    df[selected_cols] = df[selected_cols].clip(lower=lower_cap, upper=upper_cap, axis=1)
+                                    st.success("Outliers capped successfully")
+                                    st.session_state.processed_data = df.copy()
+                                    st.dataframe(df.head())
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error applying capping: {e}")
 
                         elif treatment == 'Transform (Log)':
                             if st.button("Apply Log Transformation"):
@@ -470,17 +478,15 @@ def main():
                                 le = LabelEncoder()
                                 df[col] = le.fit_transform(df[col].astype(str))
                                 st.success(f"✅ Label encoding applied to {col}")
-                                st.session_state.processed_data = df.copy()
-                                st.dataframe(df.head())
-                                st.rerun()
 
                             elif encoding_method == 'One-Hot Encoding':
                                 dummies = pd.get_dummies(df[col], prefix=col, dtype=int)  # Ensure 0 and 1
                                 df = pd.concat([df.drop(col, axis=1), dummies], axis=1)
                                 st.success(f"One-hot encoding applied to {col}")
-                                st.session_state.processed_data = df.copy()
-                                st.dataframe(df.head())
-                                st.rerun()
+
+                        st.session_state.processed_data = df.copy()
+                        st.dataframe(df.head())
+                        st.rerun()
 
             with col2:
                 st.markdown("#### Categorical Variable Summary")
@@ -553,6 +559,76 @@ def main():
                 st.success("Data saved!")
 
     # --- Tab 6: Data Type Conversion ---
+    with tabs[5]:
+        st.markdown("### ⚙️ Data Type Conversion")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### Select Columns and Data Types")
+            columns_to_convert = st.multiselect(
+                "Select columns to convert:",
+                df.columns,
+                key="convert_cols"
+            )
+
+            data_types = {
+                'None': None,
+                'Numeric (int)': 'int',
+                'Numeric (float)': 'float',
+                'Categorical (object)': 'object',
+                'Date': 'datetime64[ns]'
+            }
+
+            selected_types = {}
+            for col in columns_to_convert:
+                selected_types[col] = st.selectbox(
+                    f"Select data type for {col}:",
+                    data_types.keys(),
+                    key=f"type_{col}"
+                )
+
+            if st.button("Apply Data Type Conversion"):
+                for col in columns_to_convert:
+                    selected_type = selected_types[col]
+                    if selected_type != 'None':
+                        try:
+                            if data_types[selected_type] == 'datetime64[ns]':
+                                df[col] = pd.to_datetime(df[col], errors='coerce')
+                            else:
+                                df[col] = df[col].astype(data_types[selected_type])
+                            st.success(f"✅ Converted {col} to {selected_type}")
+                        except Exception as e:
+                            st.error(f"❌ Conversion of {col} failed: {e}")
+
+                st.session_state.processed_data = df.copy()
+                st.dataframe(df.head())
+                st.rerun()
+
+        with col2:
+            st.markdown("#### Data Type Summary")
+            dtype_summary = pd.DataFrame(df.dtypes, columns=['Data Type'])
+            st.dataframe(dtype_summary)
+
+        st.markdown("#### Current Data Preview")
+        st.dataframe(df.head())
+
+        # Buttons at the bottom
+        col1, col2 = st.columns(2)
+        with col1:
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="📁 Download CSV",
+                data=csv,
+                file_name="preprocessed_data_tab7.csv",
+                mime="text/csv"
+            )
+        with col2:
+            if st.button("💾 Save for Next Steps", key="save_tab7"):
+                st.session_state.processed_data = df.copy()
+                st.success("Data saved!")
+
+    # --- Tab 8: Feature Engineering ---
     with tabs[6]:
         st.markdown("### ✨ Feature Engineering")
 
@@ -565,29 +641,54 @@ def main():
             feature_type = st.selectbox("Feature Type:", ['None', 'Numeric', 'Categorical', 'Binning'])
 
             if feature_type == 'Numeric':
-                operation = st.selectbox("Operation:", ['Addition', 'Subtraction', 'Multiplication', 'Division'])
-                col1_name = st.selectbox("Column 1:", df.columns)
-                col2_name = st.selectbox("Column 2:", df.columns)
+                operation = st.selectbox("Operation:", ['Custom Calculation', 'Addition', 'Subtraction', 'Multiplication', 'Division'])
 
-                if st.button("Create Feature"):
-                    if not feature_name or not col1_name or not col2_name:
-                        st.error("Please provide all required inputs for feature creation.")
-                    else:
-                        try:
-                            if operation == 'Addition':
-                                df[feature_name] = df[col1_name] + df[col2_name]
-                            elif operation == 'Subtraction':
-                                df[feature_name] = df[col1_name] - df[col2_name]
-                            elif operation == 'Multiplication':
-                                df[feature_name] = df[col1_name] * df[col2_name]
-                            elif operation == 'Division':
-                                df[feature_name] = df[col1_name] / df[col2_name]
-                            st.success(f"✅ Created new feature: {feature_name}")
-                            st.session_state.processed_data = df.copy()
-                            st.dataframe(df.head())
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Feature creation failed: {e}")
+                if operation == 'Custom Calculation':
+                    st.markdown("Enter calculation using column names (e.g., `Loan_Amount + Interest_Rate * Status`)")
+                    # Create a dictionary of column names for easy replacement
+                    column_dict = {col: f"`{col}`" for col in df.columns}
+                    calculation = st.text_input("Calculation:", help="Use backticks (`) around column names (e.g., `Loan_Amount` + `Interest_Rate`)")
+
+                    if st.button("Create Feature"):
+                        if not feature_name or not calculation:
+                            st.error("Please provide all required inputs for feature creation.")
+                        else:
+                            try:
+                                # Replace column names with backticks
+                                for col, replacement in column_dict.items():
+                                    calculation = calculation.replace(col, replacement)
+
+                                df[feature_name] = df.eval(calculation)
+                                st.success(f"✅ Created new feature: {feature_name}")
+                                st.session_state.processed_data = df.copy()
+                                st.dataframe(df.head())
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Feature creation failed: {e}")
+
+                else:
+                    col1_name = st.selectbox("Column 1:", df.columns)
+                    col2_name = st.selectbox("Column 2:", df.columns)
+
+                    if st.button("Create Feature"):
+                        if not feature_name or not col1_name or not col2_name:
+                            st.error("Please provide all required inputs for feature creation.")
+                        else:
+                            try:
+                                if operation == 'Addition':
+                                    df[feature_name] = df[col1_name] + df[col2_name]
+                                elif operation == 'Subtraction':
+                                    df[feature_name] = df[col1_name] - df[col2_name]
+                                elif operation == 'Multiplication':
+                                    df[feature_name] = df[col1_name] * df[col2_name]
+                                elif operation == 'Division':
+                                    df[feature_name] = df[col1_name] / df[col2_name]
+                                st.success(f"✅ Created new feature: {feature_name}")
+                                st.session_state.processed_data = df.copy()
+                                st.dataframe(df.head())
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Feature creation failed: {e}")
 
             elif feature_type == 'Categorical':
                 # Example: Combining two categorical columns
@@ -637,15 +738,15 @@ def main():
             st.download_button(
                 label="📁 Download CSV",
                 data=csv,
-                file_name="preprocessed_data_tab6.csv",
+                file_name="preprocessed_data_tab8.csv",
                 mime="text/csv"
             )
         with col2:
-            if st.button("💾 Save for Next Steps", key="save_tab6"):
+            if st.button("💾 Save for Next Steps", key="save_tab8"):
                 st.session_state.processed_data = df.copy()
                 st.success("Data saved!")
 
-    # --- Tab 7: Data Type Conversion ---
+    # --- Tab 9: Summary ---
     with tabs[7]:
         st.markdown("### 📊 Preprocessing Summary")
 
@@ -715,6 +816,13 @@ def main():
                 st.session_state.processed_data = original_df.copy()
                 st.success("Data reset to original state")
                 st.rerun()
+
+    st.markdown("---")
+    st.markdown("Ready to move to feature selection? Click here")
+    if st.button("Go to Feature Selection"):
+        st.session_state['feature_selection_data'] = df.copy()
+        st.success("Data saved for Feature Selection!")
+        st.info("You can now navigate to the Feature Selection page to use this data.")
 
 if __name__ == "__main__":
     main()
