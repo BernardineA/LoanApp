@@ -129,8 +129,13 @@ if models is None:
     st.error("Failed to load models. Please check the training page and ensure models are saved correctly.")
     st.stop()
 
-# Now it’s safe to do this:
-selected_model_name = 'All Features'
+# Dynamically select the first available model
+if models:
+    selected_model_name = next(iter(models))  # Get the first key
+    st.info(f"Using model: {selected_model_name}")  # Inform the user
+else:
+    st.error("No models found. Please check the training page and ensure models are saved correctly.")
+    st.stop()
 
 # Check if models is a dictionary before attempting to iterate
 if not isinstance(models, dict):
@@ -197,10 +202,8 @@ with st.form("loan_application_form"):
     try:
         required_features = list(selected_model.feature_names_in_)  # Works for some models
     except AttributeError:
-        if feature_names and selected_model_name != 'All Features':
+        if feature_names and selected_model_name:
             required_features = feature_names[selected_model_name]
-        elif feature_names:
-            required_features = feature_names['All Features']
         else:
             required_features = []
 
@@ -215,7 +218,7 @@ with st.form("loan_application_form"):
         # Determine the input type based on the feature name (you might need a better mapping)
         if 'income' in feature.lower() or 'amount' in feature.lower() or 'credit' in feature.lower() or 'age' in feature.lower() or 'experience' in feature.lower():
             dynamic_fields[feature] = st.number_input(f"❌ Please enter: {feature}", help=f"This field is required for the model.", key=f"dynamic_{feature}")
-        elif 'status' in feature.lower() or 'purpose' in feature.lower() or 'gender' in feature.lower():
+        elif 'status' in feature.lower() or 'purpose' in feature.lower() or 'gender' in feature.lower() or 'marital' in feature.lower():
             dynamic_fields[feature] = st.selectbox(f"❌ Please enter: {feature}", options=['Option 1', 'Option 2', 'Option 3'], help=f"This field is required for the model.", key=f"dynamic_{feature}")  # Replace options
         else:
             dynamic_fields[feature] = st.text_input(f"❌ Please enter: {feature}", help=f"This field is required for the model.", key=f"dynamic_{feature}")  # Unique key
@@ -363,4 +366,4 @@ with st.form("loan_application_form"):
 
 # --- Footer ---
 st.markdown("---")
-st.markdown("© 2024 Loan Prediction Services. Contact: info@loanpredictions.com")
+st.markdown("© 2025 Group 1 Loan Prediction Services. Contact: Group One for All Your Loan Related Issues.")
