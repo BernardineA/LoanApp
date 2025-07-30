@@ -71,55 +71,51 @@ def validate_input_data(input_data, feature_names):
     return errors
 
 
-def make_prediction(models, input_data, selected_models, feature_names):
+def make_prediction(models, input_data, selected_model, feature_names):
     """Make predictions using selected models"""
     predictions = {}
 
     # Convert input data to DataFrame
     input_df = pd.DataFrame([input_data])
 
-    for model_name in selected_models:
-        if model_name in models:
-            # Check if 'model' key exists before accessing it
-            if 'model' not in models[model_name]:
-                st.error(f"Model '{model_name}' is missing the 'model' key.  Check the evaluation page.")
-                continue  # Skip this model
+    # Use only the selected model
+    model_name = selected_model
+    if model_name in models:
+        # Check if 'model' key exists before accessing it
+        if 'model' not in models[model_name]:
+            st.error(f"Model '{model_name}' is missing the 'model' key.  Check the evaluation page.")
+            return {}  # Return empty dictionary to indicate failure
 
-            model = models[model_name]['model']  # Access the model from the result
+        model = models[model_name]['model']  # Access the model from the result
 
-            try:
-                # Subset the input data to only include the features used by the model
-                if model_name != 'All Features':
-                    # Ensure all required features are present in input_data
-                    required_model_features = feature_names[model_name]
-                    if not all(feature in input_data for feature in required_model_features):
-                        missing = ", ".join(set(required_model_features) - set(input_data.keys()))
-                        st.error(f"Missing features for model {model_name}.  Required features: {missing}")
-                        continue  # Skip this model if features are missing
+        try:
+            # Subset the input data to only include the features used by the model
+            required_model_features = feature_names[model_name]
+            if not all(feature in input_data for feature in required_model_features):
+                missing = ", ".join(set(required_model_features) - set(input_data.keys()))
+                st.error(f"Missing features for model {model_name}.  Required features: {missing}")
+                return {}  # Return empty dictionary to indicate failure
 
-                    input_df_subset = input_df[required_model_features]
-                else:
-                    required_model_features = feature_names['All Features']
-                    if not all(feature in input_data for feature in required_model_features):
-                        missing = ", ".join(set(required_model_features) - set(input_data.keys()))
-                        st.error(f"Missing features for model All Features.  Required features: {missing}")
-                        continue  # Skip this model if features are missing
-                    input_df_subset = input_df[required_model_features]
+            input_df_subset = input_df[required_model_features]
 
-                prediction = model.predict(input_df_subset)[0]
+            prediction = model.predict(input_df_subset)[0]
 
-                # Ensure prediction is non-negative
-                prediction = max(0, prediction)
+            # Ensure prediction is non-negative
+            prediction = max(0, prediction)
 
-                # Assuming all models are LinearRegression for this example
-                r2_score = models[model_name]['r2']  # Get R-squared from the model's evaluation result
+            # Assuming all models are LinearRegression for this example
+            r2_score = models[model_name]['r2']  # Get R-squared from the model's evaluation result
 
-                predictions[model_name] = {
-                    'prediction': prediction,
-                    'confidence': r2_score
-                }
-            except Exception as e:
-                st.error(f"Error making prediction with {model_name}: {str(e)}")
+            predictions[model_name] = {
+                'prediction': prediction,
+                'confidence': r2_score
+            }
+        except Exception as e:
+            st.error(f"Error making prediction with {model_name}: {str(e)}")
+            return {}  # Return empty dictionary to indicate failure
+    else:
+        st.error(f"Selected model '{model_name}' not found.")
+        return {}  # Return empty dictionary to indicate failure
 
     return predictions
 
@@ -216,7 +212,18 @@ def main():
         # Assuming the model is stored in the 'model' key of the evaluation result
         # and feature names are stored in 'feature_names'
         models[model_name] = result  # Store the entire result
-        feature_names[model_name] = list(df.drop(columns=[target_col]).columns)  # All features
+        # Automatically detect features used by the model
+        if hasattr(result['model'], 'feature_names_in_'):
+            feature_names[model_name] = list(result['model'].feature_names_in_)
+        elif hasattr(result['model'], 'feature_importances_'):
+            # If the model has feature importances, assume all features are used
+            feature_names[model_name] = list(df.drop(columns=[target_col]).columns)
+        elif hasattr(result['model'], 'coef_'):
+            # If the model has coefficients, assume all features are used
+            feature_names[model_name] = list(df.drop(columns=[target_col]).columns)
+        else:
+            # If no feature information is available, assume all features are used
+            feature_names[model_name] = list(df.drop(columns=[target_col]).columns)
 
     st.success("✅ Models and feature names loaded successfully!")
 
@@ -224,36 +231,28 @@ def main():
     st.markdown("## 🎯 Model Selection")
 
     available_models = list(models.keys())
-    selected_models = st.multiselect(
-        "Select models for prediction:",
+    selected_model = st.selectbox(
+        "Select a model for prediction:",
         available_models,
-        default=available_models,
-        help="Choose which models to use for making predictions"
+        index=0,  # Select the first model by default
+        help="Choose which model to use for making predictions"
     )
 
     # Ensure 'loan_amount' is always a required feature
     required_features = set()
-    for model_name in selected_models:
-        if model_name != 'All Features':
-            required_features.update(feature_names[model_name])
-        else:
-            required_features.update(feature_names['All Features'])
+    # Use the selected model's features
+    required_features.update(feature_names[selected_model])
     required_features.add('loan_amount')  # Ensure loan_amount is always required
-
-    if not selected_models:
-        st.warning("Please select at least one model for predictions.")
-        return
 
     # Display model information
     st.markdown("### 📊 Model Performance Overview")
 
     model_info_data = []
-    for model_name in selected_models:
-        model_info_data.append({
-            'Model': model_name,
-            'R² Score': evaluation_results[model_name]['r2'],  # Get R² from evaluation results
-            'Status': '✅ Ready'
-        })
+    model_info_data.append({
+        'Model': selected_model,
+        'R² Score': evaluation_results[selected_model]['r2'],  # Get R² from evaluation results
+        'Status': '✅ Ready'
+    })
 
     model_df = pd.DataFrame(model_info_data)
     st.dataframe(model_df)
@@ -431,6 +430,12 @@ def main():
                 format="%d"
             )
 
+    # Dynamically generate input fields
+    st.subheader("Required Features")
+    for feature in required_features:
+        if feature not in input_data:
+            input_data[feature] = st.text_input(f"Required: {feature}", help=f"Please enter the value for {feature}")
+
     # Prediction button
     col1, col2, col3 = st.columns([1, 1, 1])
 
@@ -441,7 +446,7 @@ def main():
         # Validate input
         # Check for missing input fields
         for feature in required_features:
-            if feature not in input_data:
+            if feature not in input_data or not input_data[feature]:
                 missing_input_fields.append(feature)
 
         errors = validate_input_data(input_data, required_features)
@@ -450,8 +455,6 @@ def main():
             st.error("❌ Please fix the following errors:")
             if missing_input_fields:
                 st.error(f"• Missing required features: {', '.join(missing_input_fields)}")
-            for error in errors:
-                st.error(f"• {error}")
 
             # Apply CSS to highlight missing input fields
             for feature in missing_input_fields:
@@ -460,7 +463,7 @@ def main():
                     <script>
                         var labels = document.querySelectorAll('label');
                         labels.forEach(label => {{
-                            if (label.textContent.trim() === '{feature}') {{
+                            if (label.textContent.trim() === 'Required: {feature}') {{
                                 label.style.border = '2px solid red';
                             }}
                         }});
@@ -476,7 +479,7 @@ def main():
                 predictions = make_prediction(
                     models,  # Pass the entire models dictionary
                     input_data,
-                    selected_models,
+                    selected_model,  # Pass the selected model
                     feature_names
                 )
 
@@ -502,8 +505,9 @@ def main():
                     st.metric("Risk Percentage", f"{risk_percentage:.1f}%")
 
                 with col4:
+                    # Fix: Use the length of the predictions dictionary, which will be 1 if the prediction was successful
                     model_agreement = len(predictions)
-                    st.metric("Model Agreement", f"{model_agreement}/{len(selected_models)}")
+                    st.metric("Model Agreement", f"{model_agreement}/1")  # Only one model is used
 
                 # Detailed predictions
                 st.markdown("### 📊 Individual Model Predictions")
